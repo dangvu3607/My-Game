@@ -106,7 +106,7 @@ class Player(pygame.sprite.Sprite):
         self.hit_point = 3
     
     def jump(self):
-        self.y_vel = -self.GRAVITY * 8
+        self.y_vel = -self.GRAVITY * 10
         self.jump_count += 1
         if self.jump_count == 1:
             self.fall_count = 0
@@ -238,7 +238,10 @@ class Fire(Object):
     def off(self):
         self.animation_name = "off"
 
-    def loop(self):
+    def move(self, dy):
+        self.rect.y += dy
+
+    def loop(self, vel):
         sprites = self.fire[self.animation_name]
         sprite_index = (self.animation_count //
                         self.ANIMATION_DELAY) % len(sprites)
@@ -251,6 +254,8 @@ class Fire(Object):
 
         if self.animation_count // self.ANIMATION_DELAY > len(sprites):
             self.animation_count = 0
+
+        self.move(vel)
         
 class Meteor(Object):
     GRAVITY = 1
@@ -347,6 +352,7 @@ class Enemies(pygame.sprite.Sprite):
         self.move(self.x_vel)
         self.update_sprite()
 '''
+
 # Set the coordinates and image for the background
 def get_background(name):
     # Get the image
@@ -362,12 +368,15 @@ def get_background(name):
     return tiles, image
 
 # Main draw to display to the platformer
-def draw(window, background, bg_image, player, objects, timer, offset_x, offset_y):
+def draw(window, background, bg_image, player, objects, fires, timer, offset_x, offset_y):
     for tile in background:
         window.blit(bg_image, tile)
 
     for object in objects:
         object.draw(window, offset_x, offset_y)
+
+    for fire in fires:
+        fire.draw(window, offset_x, offset_y)
 
 
     global game_active
@@ -399,7 +408,7 @@ def draw(window, background, bg_image, player, objects, timer, offset_x, offset_
     player.draw(window,offset_x, offset_y)
     pygame.display.update()
 
-def handle_vertical_collision(player, objects, dy):
+def handle_vertical_collision(player, objects, fires, dy):
     collided_objects = []
     for obj in objects:
         if pygame.sprite.collide_mask(player, obj):
@@ -412,10 +421,21 @@ def handle_vertical_collision(player, objects, dy):
                 player.hit_head()
             
             collided_objects.append(obj)
+    for fire in fires:
+        if pygame.sprite.collide_mask(player, fire):
+            if dy > 0:
+                player.rect.bottom = obj.rect.top
+                player.landed()
+
+            elif dy < 0:
+                player.rect.top = obj.rect.bottom
+                player.hit_head()
+
+            collided_objects.append(fire)
     
     return collided_objects
 
-def collided(player, objects, dx):
+def collided(player, objects, fires, dx):
     player.move(dx, 0)
     player.update()
     collided_objects = []
@@ -424,17 +444,21 @@ def collided(player, objects, dx):
         if pygame.sprite.collide_mask(player, obj):
             collided_objects.append(obj)
             break
+    for fire in fires:
+        if pygame.sprite.collide_mask(player, fire):
+            collided_objects.append(fire)
+            break
 
     player.move(-dx, 0)
     player.update()
     return collided_objects
 
 # Handlebar (Keybind) setting
-def handle_move(player, objects, sfx):
+def handle_move(player, objects, fires, sfx):
     keys = pygame.key.get_pressed()
     player.x_vel = 0
-    collided_left = collided(player, objects, - PLAYER_VEL * 2)
-    collided_right = collided(player, objects, PLAYER_VEL * 2)
+    collided_left = collided(player, objects, fires , - PLAYER_VEL * 2)
+    collided_right = collided(player, objects, fires, PLAYER_VEL * 2)
     
 
     if (keys[pygame.K_LEFT] or keys[pygame.K_a]) and not collided_left and game_active:
@@ -442,7 +466,7 @@ def handle_move(player, objects, sfx):
     elif (keys[pygame.K_RIGHT] or keys[pygame.K_d]) and not collided_right and game_active:
         player.move_right(PLAYER_VEL)
 
-    vertical_collided = handle_vertical_collision(player, objects, player.y_vel)
+    vertical_collided = handle_vertical_collision(player, objects, fires, player.y_vel)
     to_check = [*collided_left, *collided_right, *vertical_collided]
     for obj in to_check:
         if obj and (obj.name == "fire" or obj.name == "meteor"):
@@ -470,20 +494,20 @@ def main(window):
     # Set variables for the return values from the function
     background, bg_image = get_background("Blue.png")
 
-    pygame.mixer.music.load(join("BGM", "Loop.wav"))
+    pygame.mixer.music.load(join("assets", "BGM", "Loop.wav"))
     pygame.mixer.music.set_volume(0.1)
     pygame.mixer.music.play(-1)
         
 
-    hit_SFX = pygame.mixer.Sound(join("SFX", "Playful_Hit.wav"))
-    die_SFX = pygame.mixer.Sound(join("SFX", "Playful_Death.wav"))
+    hit_SFX = pygame.mixer.Sound(join("assets", "SFX", "Playful_Hit.wav"))
+    die_SFX = pygame.mixer.Sound(join("assets", "SFX", "Playful_Death.wav"))
     pygame.mixer.Sound.set_volume(hit_SFX, 0.1)
     pygame.mixer.Sound.set_volume(die_SFX, 0.2)
 
     block_size = 96
     meteor_size = 64
     player = Player(400, HEIGHT - block_size, 50, 50)
-    fires =[Fire(i*16, HEIGHT, 16, 32) for i in range(WIDTH//16 + 1)]
+    fires =[Fire(i*32, HEIGHT - 100, 16, 32) for i in range(-2 ,WIDTH//16 + 1)]
     for fire in fires:
         fire.on()
 
@@ -495,10 +519,10 @@ def main(window):
     meteors = [Meteor(i*meteor_size, i*meteor_size, meteor_size) for i in range(random.randint(1,20))]
     meteor_shower = False
 
-    floor = [Block(i*block_size, HEIGHT - block_size, block_size) for i in range(0, (500)// block_size)]
+    floor = [Block(i*block_size, HEIGHT - block_size, block_size) for i in range(-1, (500)// block_size)]
     
     block2 = Block(0, HEIGHT - block_size * 2, block_size)
-    objects = [*floor, *fires, block2, *meteors]
+    objects = [*floor, block2, *meteors]
     
     offset_x = 0
     offset_y = 0
@@ -542,12 +566,13 @@ def main(window):
                     for j in range(counter, counter + 1):               
                         random_placement = next(random_generator(1,5))
                         
-                        if elapsed_time <= 10:
+                        if elapsed_time <= 4:
                             more_meteor = [Meteor((i+random_placement)*block_size, HEIGHT - block_size*2*j, block_size) for i in range(0 , next(random_generator(1,2)))]
                             meteors += more_meteor
                         
                         flying_plat = [Block((i+random_placement)*block_size, HEIGHT - block_size*2*j, block_size) for i in range(0 , next(random_generator(1,2)))]
                     objects += flying_plat 
+                    print("work")
                     
                     for meteor in meteors:
                         objects.append(meteor)
@@ -564,20 +589,23 @@ def main(window):
         if not game_active:
             pygame.mixer.music.pause()
             pygame.mixer.Sound.set_volume(hit_SFX, 0)
-
+            fires = []
 
             if restart_key[pygame.K_q]:
                 restart_game(player)
                 respawn(player)
                 offset_y = 7
                 screen_scroll = 0
+                fires =[Fire(i*16, HEIGHT, 16, 32) for i in range(-2, WIDTH//16 + 1)]
+
                 pygame.mixer.music.play()
                 pygame.mixer.Sound.set_volume(hit_SFX, 0.2)
 
         # Update the player's movement 
         player.loop(FPS)
-        fire.loop()
-        handle_move(player, objects, hit_SFX)
+        for fire in fires:
+            fire.loop(screen_scroll//6)
+        handle_move(player, objects, fires, hit_SFX)
 
         # Timer in second
         if game_active:
@@ -589,7 +617,7 @@ def main(window):
         screen_scroll = -math.log(elapsed_time + 1)*2
         
         # Initiate draw function to draw background
-        draw(window, background, bg_image, player, objects, elapsed_time, offset_x, offset_y)
+        draw(window, background, bg_image, player, objects, fires, elapsed_time, offset_x, offset_y)
 
         
         if (((player.rect.right - offset_x) >= (WIDTH - scroll_area_width)) and player.x_vel > 0) or (
@@ -597,22 +625,11 @@ def main(window):
             offset_x += player.x_vel
 
         if (player.rect.y <= scroll_area_height and player.y_vel < 0) or (player.rect.y >= HEIGHT - scroll_area_height and player.y_vel > 0):
-            offset_y += player.y_vel*0
-
-
-        
-
-
-        
-    
-        
-
-       
-    
+            offset_y += player.y_vel*0     
 
     # Quit the game if the "X" button is clicked (part 2)
     pygame.quit()
-    quit()
+    
 
 
 # Open the game platform only if the code in this file is run
